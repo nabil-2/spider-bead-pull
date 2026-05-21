@@ -1,0 +1,52 @@
+{
+  "figs": {
+    "diagnostics": {
+      "hg_modes_abs.png": "Absolute-value Hermite-Gaussian sanity plot used to inspect modal building blocks.",
+      "hg_modes_real.png": "Real-part Hermite-Gaussian sanity plot.",
+      "hg_modes_imag.png": "Imaginary-part Hermite-Gaussian sanity plot."
+    },
+    "comparisons": {
+      "heatmap_et_complex_nrmse.png": "2D grid of complex `E_T` NRMSE over line count and z-slice count, split by gap count.",
+      "heatmap_median_relative_abs_et_error.png": "2D grid of median relative `|E_T|` error over the same configuration axes.",
+      "et_complex_nrmse_vs_gap_count.png": "How complex `E_T` error changes as more leading gaps are included.",
+      "median_relative_abs_et_error_vs_gap_count.png": "How median relative `|E_T|` error changes with gap count.",
+      "fit_success_cost_summary.png": "Fit success fraction and fit-cost overview across configurations.",
+      "error_vs_reduced_dataset_size.png": "Scatter view linking reduced dataset size to complex `E_T` error."
+    },
+    "config_common": {
+      "point_selection.png": "Selected measurement points overlaid on the underlying `|S11|` slice and default line geometry.",
+      "fitted_efield_comparison.png": "Reduced fitted field versus full-grid field on the selected z-slice and frequency.",
+      "fitted_efield_residual.png": "Residual between the fitted reduced field and the full-grid reference field.",
+      "sqrt_dgamma_correction.png": "Before/after correction view for reduced `sqrt(Δγ)` against the full-grid phase and sign.",
+      "beam_model_components.png": "Hermite-Gaussian beam-model decomposition for the chosen fit parameters.",
+      "et_complex_plane.png": "Complex-plane comparison of full and reduced `E_T` values.",
+      "abs_et_over_z.png": "Magnitude of `E_T` as a function of z-position.",
+      "abs_et_over_frequency.png": "Magnitude of `E_T` across frequency for every retained z-position.",
+      "real_et_over_frequency.png": "Real part of `E_T` across frequency.",
+      "imag_et_over_frequency.png": "Imaginary part of `E_T` across frequency."
+    },
+    "config_line_scaled": {
+      "pattern": "sqrt_dgamma_line_##.png",
+      "description": "Per-line `sqrt(Δγ)` baseline subtraction and line-ordering plot. One file is present for each selected line."
+    }
+  },
+  "data": {
+    "legacy_groups": [
+      {
+        "label": "ET_results.npz",
+        "description": "Legacy ET result bundle from earlier analysis iterations."
+      },
+      {
+        "label": "beam_fit_results*.pkl",
+        "description": "Legacy beam-fit cache variants kept outside the newer variation-study folder."
+      }
+    ],
+    "adaptive_bead_pull_variations": {
+      "fits": "One cache per `(line_count, gap)` pair. Each pickle stores fitted parameters, costs, success flags, frequencies, and reduced-point counts.",
+      "full_reference": "One `.npz` per discovered gap containing the full-grid `E_T` reference for that gap.",
+      "results": "One `.npz` per configuration, storing reduced and full `E_T` arrays together with the configuration selectors.",
+      "metrics.csv": "Tabular summary across all configurations, including fit quality and `E_T` error metrics.",
+      "slurm": "Array-job inputs, submission script, and captured `.out` / `.err` logs for the fit-cache stage."
+    }
+  }
+}

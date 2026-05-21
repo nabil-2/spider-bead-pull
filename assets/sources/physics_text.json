@@ -1,0 +1,76 @@
+{
+  "07_configuration_geometry_and_sampling": {
+    "title": "Configuration Geometry And Sampling",
+    "subtitle": "The configuration knobs are physical sampling choices on the aperture: how many spider-web lines are kept, and therefore how many bead-pull points survive per gap."
+  },
+  "08_gap_and_z_coverage": {
+    "title": "Gap And z Coverage",
+    "subtitle": "The four discovered gaps occupy distinct z regions. `gap_count` chooses how many of those regions are included, while `z_slice_count` chooses how many sampled z positions are retained inside each included gap."
+  },
+  "09_bead_pull_physics_chain": {
+    "title": "Bead-Pull Physics Chain",
+    "subtitle": "The reduced reconstruction starts from the measured complex reflection map, isolates the bead response in time, removes the slowly varying baseline, and converts the residual into a field-sensitive quantity.",
+    "top_chain": [
+      {
+        "title": "Measured Response",
+        "lines": [
+          "$S_{11}(x,y,z,\\nu)$ is measured on the full aperture grid.",
+          "Each map combines cavity response, background, and the localized bead perturbation."
+        ]
+      },
+      {
+        "title": "Time Gate",
+        "lines": [
+          "$S_{11}(t)=\\mathcal{F}^{-1}[S_{11}(\\nu)]$",
+          "$S_{11}^{\\mathrm{gated}}(t)=G(t-t_{\\mathrm{bead}})\\,S_{11}(t)$"
+        ]
+      },
+      {
+        "title": "Line Baseline",
+        "lines": [
+          "$\\Delta\\Gamma(s,z,\\nu)=S_{11}(s,z,\\nu)-[\\beta_0(z,\\nu)+\\beta_1(z,\\nu)s]$",
+          "$\\sqrt{\\Delta\\gamma}$ keeps amplitude and unwrapped phase."
+        ]
+      },
+      {
+        "title": "Field Proxy",
+        "lines": [
+          "$E(x,y,z,\\nu)=\\sqrt{\\Delta\\gamma}\\,\\sqrt{\\frac{4P_{\\mathrm{in}}}{\\epsilon_0\\alpha_0 i 2\\pi\\nu}}$",
+          "$\\alpha_0=\\frac{3\\Delta\\epsilon V_b}{\\epsilon_b+2}$"
+        ]
+      }
+    ],
+    "formula_block": [
+      "$t_{\\mathrm{bead}}(x,y,z)=\\frac{2}{c}\\sqrt{r(z)^2+x^2+y^2}$",
+      "$G(t)$ is a cosine-edged window of width $t_{\\mathrm{width}}$ centered on the predicted bead return.",
+      "The reduced line products are phase/sign matched against the full-grid $\\sqrt{\\Delta\\gamma}$ before the field conversion is applied."
+    ]
+  },
+  "10_mode_model_and_fit_parameters": {
+    "title": "Mode Model And Fit Parameters",
+    "subtitle": "The reconstruction uses a Hermite-Gaussian-inspired beam prior. The diagnostics visualize low-order HG building blocks, while the current fit uses a fundamental HG00-like envelope with curvature and global phase.",
+    "model_formula": [
+      "$E(x,y)=A\\,\\exp\\!\\left[-\\frac{(x-x_0)^2+(y-y_0)^2}{s^2}\\right] \\, \\mathrm{HG}(x,y) \\, \\exp\\!\\left(i[\\kappa r^2+\\phi_0]\\right)$",
+      "$r^2=(x-x_0)^2+(y-y_0)^2$",
+      "In the present fit, the modal weights are fixed to HG00, so $\\mathrm{HG}(x,y)=1$ in the fitted model."
+    ],
+    "parameter_meaning": [
+      "$x_0, y_0$: beam center on the aperture",
+      "$A$: complex field scale after absorbing the best-fit global factor",
+      "$s$: transverse beam width",
+      "$\\kappa$: quadratic phase curvature",
+      "$\\phi_0$: global phase offset",
+      "The parameter vector is fitted independently for every retained $(z,\\nu)$ slice."
+    ]
+  },
+  "11_complex_ET_reconstruction": {
+    "title": "Complex ET Reconstruction",
+    "subtitle": "The physics target is the complex transverse field integral. Strong and stressed configurations can be compared directly against the full-grid reference in both the complex plane and along z.",
+    "et_formula": "$E_T(z,\\nu)=\\iint_A E(x,y,z,\\nu)\\,dx\\,dy$"
+  },
+  "12_configuration_tradeoffs_for_physics": {
+    "title": "Configuration Tradeoffs For Physics",
+    "subtitle": "The dominant tradeoff is physical coverage versus fidelity: more spider lines help, while extending the reconstruction across more gap regions stresses the reduced model strongly.",
+    "takeaway": "For this dataset, the best overall reconstruction comes from the densest in-plane sampling but only the highest-z gap. Multi-gap reconstructions are much harder: even the best multi-gap option is far worse than the single-gap optimum, and the fully covered 4-gap / 3-slice configuration remains a clear stress test rather than a precision configuration."
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "font": "DejaVu Sans",
+  "font_path": "/software/mamba/2024.01/fonts/DejaVuSans.ttf",
+  "colors": {
+    "bg": "#FCFBF7",
+    "panel": "#F7F1E7",
+    "panel_alt": "#EEF5F6",
+    "panel_warm": "#F8E7D6",
+    "panel_green": "#EAF4EC",
+    "border": "#D8CDBB",
+    "border_strong": "#BBA888",
+    "text": "#1F2933",
+    "muted": "#5F6B73",
+    "edge": "#76838F",
+    "accent": "#0F766E",
+    "accent_soft": "#D7EFEC",
+    "physics": "#9A5A17",
+    "physics_soft": "#F6E7D6",
+    "data": "#1D4ED8",
+    "data_soft": "#DBEAFE",
+    "success": "#2E7D32",
+    "success_soft": "#E6F4EA",
+    "warning": "#8B5A2B",
+    "warning_soft": "#FAEBD8"
+  }
+}

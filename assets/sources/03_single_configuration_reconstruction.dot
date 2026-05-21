@@ -1,0 +1,47 @@
+digraph SingleConfiguration {
+  graph [
+    rankdir=TB,
+    splines=polyline,
+    newrank=true,
+    pad="0.08",
+    margin="0.02",
+    nodesep="0.16",
+    ranksep="0.22",
+    size="13.333,7.5!",
+    ratio="compress",
+    bgcolor="__BG__",
+    fontname="__FONT__",
+    labelloc="t",
+    label=<
+      <TABLE BORDER="0" CELLBORDER="0" CELLPADDING="4">
+        <TR><TD ALIGN="LEFT"><FONT FACE="__FONT__" POINT-SIZE="22" COLOR="__TEXT__"><B>__TITLE__</B></FONT></TD></TR>
+        <TR><TD ALIGN="LEFT"><FONT FACE="__FONT__" POINT-SIZE="10" COLOR="__MUTED__">__SUBTITLE__</FONT></TD></TR>
+      </TABLE>
+    >
+  ];
+  node [shape=plain, fontname="__FONT__"];
+  edge [fontname="__FONT__", color="__EDGE__", penwidth="1.25", arrowsize="0.8"];
+
+  load [label=<__LOAD_LABEL__>];
+  gate [label=<__GATE_LABEL__>];
+  reduce [label=<__REDUCE_LABEL__>];
+  baseline [label=<__BASELINE_LABEL__>];
+  correct [label=<__CORRECT_LABEL__>];
+  convert [label=<__CONVERT_LABEL__>];
+  fit [label=<__FIT_LABEL__>];
+  integrate [label=<__INTEGRATE_LABEL__>];
+  compare [label=<__COMPARE_LABEL__>];
+  save [label=<__SAVE_LABEL__>];
+  note [label=<__NOTE_LABEL__>];
+
+  { rank=same; load; gate; }
+  { rank=same; reduce; baseline; }
+  { rank=same; correct; convert; }
+  { rank=same; fit; integrate; }
+  { rank=same; compare; save; }
+
+  load -> gate -> reduce -> baseline -> correct;
+  correct -> convert;
+  convert -> fit -> integrate -> compare -> save;
+  compare -> note [style=dashed];
+}

@@ -1,0 +1,59 @@
+digraph RepoPurpose {
+  graph [
+    rankdir=TB,
+    splines=polyline,
+    newrank=true,
+    pad="0.08",
+    margin="0.02",
+    nodesep="0.18",
+    ranksep="0.26",
+    size="13.333,7.5!",
+    ratio="compress",
+    bgcolor="__BG__",
+    fontname="__FONT__",
+    labelloc="t",
+    label=<
+      <TABLE BORDER="0" CELLBORDER="0" CELLPADDING="4">
+        <TR><TD ALIGN="LEFT"><FONT FACE="__FONT__" POINT-SIZE="22" COLOR="__TEXT__"><B>__TITLE__</B></FONT></TD></TR>
+        <TR><TD ALIGN="LEFT"><FONT FACE="__FONT__" POINT-SIZE="10" COLOR="__MUTED__">__SUBTITLE__</FONT></TD></TR>
+      </TABLE>
+    >
+  ];
+  node [shape=plain, fontname="__FONT__"];
+  edge [fontname="__FONT__", color="__EDGE__", penwidth="1.3", arrowsize="0.8"];
+
+  raw [label=<__RAW_LABEL__>];
+  notebook [label=<__NOTEBOOK_LABEL__>];
+  module [label=<__MODULE_LABEL__>];
+
+  fullref [label=<__FULLREF_LABEL__>];
+  fitcache [label=<__FITCACHE_LABEL__>];
+  assemble [label=<__ASSEMBLE_LABEL__>];
+
+  results [label=<__RESULTS_LABEL__>];
+  figures [label=<__FIGS_LABEL__>];
+  metrics [label=<__METRICS_LABEL__>];
+  note [label=<__NOTE_LABEL__>];
+
+  { rank=same; raw; notebook; }
+  { rank=same; module; fullref; }
+  { rank=same; fitcache; assemble; }
+  { rank=same; results; figures; }
+  { rank=same; metrics; note; }
+
+  raw -> notebook [label="discover_gap_files()"];
+  raw -> fullref [label="load_file()"];
+  raw -> fitcache [label="load_file() + line reduction"];
+  module -> fullref [style=dashed, label="field helpers"];
+  module -> fitcache [style=dashed, label="fit helpers"];
+  notebook -> fullref [label="compute_full_reference()"];
+  notebook -> fitcache [label="submit / wait for caches"];
+  notebook -> assemble [label="assemble_all_configurations()"];
+  fullref -> assemble [label="full-grid ET reference"];
+  fitcache -> assemble [label="fit params + costs"];
+
+  assemble -> results [label="48 configuration bundles"];
+  assemble -> figures [label="diagnostics + config + comparison figures"];
+  assemble -> metrics [label="metrics.csv"];
+  assemble -> note [style=dashed, label="physics question"];
+}

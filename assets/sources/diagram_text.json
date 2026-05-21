@@ -1,0 +1,26 @@
+{
+  "01_repo_purpose_and_inputs": {
+    "title": "Repo Purpose And Inputs",
+    "subtitle": "Reference slide: where the measurements come from, what the repo computes, and which derived products are written back to disk."
+  },
+  "02_notebook_execution_flow": {
+    "title": "Notebook Execution Flow",
+    "subtitle": "Reference slide: the notebook mainly orchestrates discovery, caching, full-reference generation, and the 48-configuration sweep."
+  },
+  "03_single_configuration_reconstruction": {
+    "title": "Single-Configuration Reconstruction",
+    "subtitle": "Reference slide: the code path taken by one `(line_count, z_slice_count, gap_count)` choice from measured `S11` to saved reduced `E_T` products."
+  },
+  "04_configuration_space": {
+    "title": "Configuration Space",
+    "subtitle": "Reference slide: the discrete sweep axes, the discovered gap ordering, and how reduced dataset size grows across the configuration grid."
+  },
+  "05_figs_folder_guide": {
+    "title": "How To Navigate figs/",
+    "subtitle": "Reference slide: `figs/` contains one diagnostics area, one comparisons area, and a configuration tree that mirrors the parameter sweep."
+  },
+  "06_data_folder_guide": {
+    "title": "How To Navigate data/",
+    "subtitle": "Reference slide: `data/` combines a small legacy layer with the current variation-study caches, bundles, metrics, and Slurm logs."
+  }
+}
