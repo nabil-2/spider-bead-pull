@@ -1,0 +1,37 @@
+{
+  "calibration_file": "config/bead_pull_calibration.json",
+  "steps_per_meter": 100000.0,
+  "output": {
+    "root": "data/spider_bead_pull_runs",
+    "directory": null
+  },
+  "scan": {
+    "step_size_m": 0.01,
+    "settle_s": 0.5,
+    "sub_thread_indices": null,
+    "length_m": null,
+    "include_endpoint": true,
+    "home_first": true
+  },
+  "stepper": {
+    "port": "/dev/ttyUSB0",
+    "baud": 9600,
+    "motor": 1,
+    "configure": true,
+    "microsteps": 8,
+    "acceleration": 1000,
+    "speed": 500,
+    "driving_voltage": 6.8,
+    "holding_voltage": 2.0
+  },
+  "vna": {
+    "ip_address": "169.254.218.2",
+    "channel": 1,
+    "port_a": 2,
+    "port_b": 1,
+    "start_freq_Hz": 18e9,
+    "stop_freq_Hz": 24e9,
+    "points": 1001,
+    "averages": 1
+  }
+}

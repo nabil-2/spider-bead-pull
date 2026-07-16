@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "created_utc": "2026-07-01T12:31:16Z",
+  "sub_threads": [
+    {
+      "index": 0,
+      "name": "z0",
+      "margin_start_m": 0.0,
+      "margin_end_m": 0.0,
+      "start_xyz_m": [
+        -0.1,
+        0.0,
+        0.0
+      ],
+      "end_xyz_m": [
+        0.1,
+        0.0,
+        0.0
+      ],
+      "start_steps": 1000,
+      "end_steps": 21000
+    },
+    {
+      "index": 1,
+      "name": "z1",
+      "margin_start_m": 0.01,
+      "margin_end_m": 0.01,
+      "start_xyz_m": [
+        -0.1,
+        0.0,
+        0.02
+      ],
+      "end_xyz_m": [
+        0.1,
+        0.0,
+        0.02
+      ],
+      "start_steps": 60000,
+      "end_steps": 40000
+    },
+    {
+      "index": 2,
+      "name": "z2",
+      "margin_start_m": 0.0,
+      "margin_end_m": 0.0,
+      "start_xyz_m": [
+        -0.1,
+        0.0,
+        0.04
+      ],
+      "end_xyz_m": [
+        0.1,
+        0.0,
+        0.04
+      ],
+      "start_steps": 80000,
+      "end_steps": 100000
+    }
+  ]
+}
