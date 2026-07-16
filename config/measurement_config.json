@@ -22,7 +22,8 @@
     "acceleration": 1000,
     "speed": 500,
     "driving_voltage": 6.8,
-    "holding_voltage": 2.0
+    "holding_voltage": 2.0,
+    "unwind_direction": "clockwise"
   },
   "vna": {
     "ip_address": "169.254.218.2",

@@ -54,6 +54,42 @@ def _parse_int(reply: Sequence[str]) -> int:
     return last
 
 
+# The physical direction the motor turns for a *positive* raw ``rotate`` command
+# is fixed by the wiring; by convention here a positive raw rotation is
+# clockwise (as seen from the motor shaft).  ``unwind_direction`` in the config
+# names the physical rotation that lets thread *out* and advances the bead, so
+# the controller can always drive that sense regardless of how the winding wheel
+# is mounted.  See :meth:`Stepper.direction_sign`.
+_CLOCKWISE_ALIASES = {"clockwise", "cw"}
+_COUNTERCLOCKWISE_ALIASES = {"counterclockwise", "anticlockwise", "anti-clockwise", "ccw"}
+
+
+def unwind_direction_sign(unwind_direction: str | int) -> int:
+    """Map an ``unwind_direction`` setting to the raw-rotation sign (+1/-1) that
+    unwinds the thread.
+
+    Accepts ``"clockwise"``/``"cw"`` (-> +1) or
+    ``"counterclockwise"``/``"anticlockwise"``/``"ccw"`` (-> -1); ``+1``/``-1``
+    are passed through.  The convention is that a *positive* raw ``rotate``
+    command turns the motor clockwise, so a clockwise unwind needs +1 and a
+    counter-clockwise unwind needs -1.
+    """
+    if isinstance(unwind_direction, (int, float)) and not isinstance(unwind_direction, bool):
+        sign = int(unwind_direction)
+        if sign in (1, -1):
+            return sign
+        raise ValueError(f"unwind_direction sign must be +1 or -1, got {unwind_direction!r}")
+    key = str(unwind_direction).strip().lower()
+    if key in _CLOCKWISE_ALIASES:
+        return 1
+    if key in _COUNTERCLOCKWISE_ALIASES:
+        return -1
+    raise ValueError(
+        f"unwind_direction must be 'clockwise' or 'counterclockwise' "
+        f"(or +1/-1), got {unwind_direction!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Calibration
 # ---------------------------------------------------------------------------
@@ -334,11 +370,16 @@ class Stepper:
     """
 
     def __init__(self, port: str, baud: int = 115200, timeout: float = 1.0,
-                 motor: int = 1, reset_delay: float = 2.0) -> None:
+                 motor: int = 1, reset_delay: float = 2.0,
+                 unwind_direction: str | int = "clockwise") -> None:
         import serial  # lazy: only needed for real hardware
 
         self.ser = serial.Serial(port, baud, timeout=timeout)
         self.motor = motor
+        # +1/-1 mapping a logical "advance the bead / unwind" move onto the raw
+        # rotation sense; the high-level interface (move_by/get_position) works in
+        # the logical frame so the calibration step anchors are unaffected.
+        self.direction_sign = unwind_direction_sign(unwind_direction)
         time.sleep(reset_delay)  # USB-serial bridges often reset on open
         self.ser.reset_input_buffer()
 
@@ -346,8 +387,9 @@ class Stepper:
     def open(cls, port: str, baud: int = 115200, motor: int = 1, timeout: float = 1.0,
              microsteps: int = 8, acceleration: int = 1000, speed: int = 500,
              driving_voltage: float = 6.8, holding_voltage: float = 2.0,
-             configure: bool = True) -> "Stepper":
-        dev = cls(port, baud=baud, timeout=timeout, motor=motor)
+             configure: bool = True, unwind_direction: str | int = "clockwise") -> "Stepper":
+        dev = cls(port, baud=baud, timeout=timeout, motor=motor,
+                  unwind_direction=unwind_direction)
         if configure:
             dev.reset()
             dev.setprofile(microsteps, acceleration, speed)
@@ -389,12 +431,16 @@ class Stepper:
         self.clearpos()
 
     def get_position(self) -> int:
-        return _parse_int(self.getpos())
+        # controller register is in the raw-rotation frame; report it in the
+        # logical frame so it round-trips with ``move_by``.
+        return self.direction_sign * _parse_int(self.getpos())
 
     def move_by(self, delta_steps: int) -> None:
         if int(delta_steps) == 0:
             return
-        self.rotate(delta_steps)
+        # translate a logical (unwind-positive) step delta into the raw rotation
+        # sense the configured unwind direction demands.
+        self.rotate(self.direction_sign * int(delta_steps))
         self.wait()
 
     def shutdown(self) -> None:
@@ -621,6 +667,7 @@ __all__ = [
     "SubThreadCalibration",
     "SimulatedMotor",
     "Stepper",
+    "unwind_direction_sign",
     "ScanPoint",
     "scan_targets",
     "BeadPullController",

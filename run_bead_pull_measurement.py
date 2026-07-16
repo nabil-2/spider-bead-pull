@@ -50,6 +50,7 @@ from src.bead_pull_controller import (  # noqa: E402
     Stepper,
     run_scan,
     scan_targets,
+    unwind_direction_sign,
 )
 
 DEFAULT_CONFIG = "config/measurement_config.json"
@@ -69,6 +70,13 @@ class StepperConfig:
     speed: int = 500
     driving_voltage: float = 6.8
     holding_voltage: float = 2.0
+    # physical rotation that unwinds the thread and advances the bead:
+    # "clockwise" or "counterclockwise" (aliases "cw"/"ccw"; +1/-1 also accepted).
+    unwind_direction: str = "clockwise"
+
+    def __post_init__(self) -> None:
+        # fail fast on a bad value rather than at motor-open time
+        unwind_direction_sign(self.unwind_direction)
 
 
 @dataclass
@@ -338,6 +346,7 @@ def build_motor(cfg: MeasurementConfig, simulate: bool):
         speed=st.speed,
         driving_voltage=st.driving_voltage,
         holding_voltage=st.holding_voltage,
+        unwind_direction=st.unwind_direction,
     )
 
 
