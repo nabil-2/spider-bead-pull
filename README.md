@@ -1,6 +1,24 @@
 # spider-bead-pull
 Data evaluation and analysis of the bead-pull method for electric field measurements in the MADMAX spider-booster setup with bead threaded like a spider web.
 
+## Setup
+
+The project is managed with [uv](https://docs.astral.sh/uv/). To create the
+environment and install dependencies:
+
+```bash
+uv sync                              # offline analysis only
+uv sync --extra hardware --extra notebook   # + real hardware backends and Jupyter
+```
+
+Run anything inside the environment with `uv run`, e.g.
+`uv run python run_bead_pull_measurement.py` or `uv run jupyter lab`.
+
+Optional dependency groups:
+- `hardware` — `pyserial` (stepper motor) and `rohdeschwarz` (VNA); imported
+  lazily, only needed when driving real instruments.
+- `notebook` — Jupyter/ipykernel for the calibration and analysis notebooks.
+
 ## Bead-position control (measurement acquisition)
 
 Drives the single-motor bead through every pass of the thread inside the booster

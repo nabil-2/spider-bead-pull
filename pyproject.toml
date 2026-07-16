@@ -1,0 +1,30 @@
+[project]
+name = "spider-bead-pull"
+version = "0.1.0"
+description = "Data evaluation and analysis of the bead-pull method for electric field measurements in the MADMAX spider-booster setup."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.13",
+    "matplotlib>=3.8",
+    "pandas>=2.0",
+    "h5py>=3.10",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+# Real hardware backends (imported lazily; not needed for offline analysis).
+hardware = [
+    "pyserial>=3.5",
+    "rohdeschwarz>=1.0",
+]
+# Jupyter notebooks used for calibration and analysis.
+notebook = [
+    "ipykernel>=6.29",
+    "jupyterlab>=4.0",
+    "notebook>=7.0",
+]
+
+[tool.uv]
+package = false
