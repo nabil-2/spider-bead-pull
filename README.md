@@ -39,6 +39,10 @@ Drives the single-motor bead through every pass of the thread inside the booster
   (the conversion is the step span divided by the distance between the two 3-D
   endpoints). The result is written to `config/bead_pull_calibration.json` (see
   [config/bead_pull_calibration.example.json](config/bead_pull_calibration.example.json)).
+  The notebook also has an **emergency stop** (Section 2b): a red button and/or
+  `Kernel ▸ Interrupt` halt the motor immediately (`hardstop` + coils off) at any
+  time, even mid-move, via `motor.emergency_stop()`. A hard stop loses steps, so
+  re-establish the position with `motor.set_position(...)` afterwards.
 - **Measurement:** [run_bead_pull_measurement.py](run_bead_pull_measurement.py).
   The `VnaMeasurement` backend (Rohde & Schwarz `rohdeschwarz` over TCP, ported
   from the old `lab-control` `lib/vna.py`) reads the complex **S<port_a><port_b>**

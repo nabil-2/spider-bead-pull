@@ -29,6 +29,7 @@ import csv
 import json
 import math
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -39,6 +40,16 @@ import numpy as np
 
 CALIBRATION_SCHEMA_VERSION = 2
 DEFAULT_CALIBRATION_PATH = Path("config/bead_pull_calibration.json")
+
+
+class EmergencyStop(RuntimeError):
+    """Raised inside a move when an emergency stop halts the motor mid-motion.
+
+    The motor has already been hard-stopped and its coils switched off by the
+    time this propagates; because a hard stop causes step-counter errors, the
+    absolute position is no longer trustworthy and must be re-established with
+    :meth:`Stepper.set_position` before any further calibrated move.
+    """
 
 
 def _utcnow() -> str:
@@ -520,6 +531,15 @@ class SimulatedMotor:
             print(f"[SimulatedMotor] set_position -> {self._position}")
         return self._position
 
+    def emergency_stop(self) -> None:
+        """Simulated emergency stop: no motion to halt, just report it.
+
+        Present so notebooks/scripts can wire a STOP button to the same call in
+        SIMULATE mode as on real hardware.
+        """
+        if self.verbose:
+            print("[SimulatedMotor] EMERGENCY STOP (no-op; motor is simulated)")
+
     def shutdown(self) -> None:
         pass
 
@@ -547,6 +567,12 @@ class Stepper:
 
         self.ser = serial.Serial(port, baud, timeout=timeout)
         self.motor = motor
+        # Serialise access to the port so an emergency stop issued from another
+        # thread (e.g. a notebook STOP button) never interleaves its bytes with a
+        # command in flight.  Re-entrant so nested command helpers are fine.
+        self._io_lock = threading.RLock()
+        # Set by emergency_stop(); a move in progress checks it and aborts.
+        self._estop = threading.Event()
         # +1/-1 mapping a logical "advance the bead / unwind" move onto the raw
         # rotation sense; the high-level interface (move_by/get_position) works in
         # the logical frame so the calibration step anchors are unaffected.
@@ -582,18 +608,19 @@ class Stepper:
 
     # -- raw I/O / command set --------------------------------------------
     def cmd(self, cmd: str, expect_reply: bool = False) -> list[str]:
-        self.ser.write((cmd + "\n").encode("ascii"))
-        self.ser.flush()
-        if not expect_reply:
-            time.sleep(0.05)  # let any echo arrive, then drain
-        lines: list[str] = []
-        deadline = time.time() + (self.ser.timeout or 1.0)
-        while time.time() < deadline:
-            raw = self.ser.readline()
-            if not raw:
-                break
-            lines.append(raw.decode("ascii", errors="replace").strip())
-        return lines
+        with self._io_lock:
+            self.ser.write((cmd + "\n").encode("ascii"))
+            self.ser.flush()
+            if not expect_reply:
+                time.sleep(0.05)  # let any echo arrive, then drain
+            lines: list[str] = []
+            deadline = time.time() + (self.ser.timeout or 1.0)
+            while time.time() < deadline:
+                raw = self.ser.readline()
+                if not raw:
+                    break
+                lines.append(raw.decode("ascii", errors="replace").strip())
+            return lines
 
     def reset(self):                 return self.cmd("reset")
     def gotoswitch(self):
@@ -602,11 +629,13 @@ class Stepper:
         # original runaway bug).  home() uses a saved position instead.
         return self.cmd(f"gotoswitch {self.motor}")
     def wait(self):                  return self.cmd(f"wait {self.motor}")
+    def busy(self):                  return self.cmd(f"busy {self.motor}", expect_reply=True)
     def rotate(self, steps):         return self.cmd(f"rotate {self.motor} {int(steps)}")
     def getpos(self):                return self.cmd(f"getpos {self.motor}", expect_reply=True)
     def setpos(self, step):          return self.cmd(f"setpos {self.motor} {int(step)}")
     def clearpos(self):              return self.cmd(f"clearpos {self.motor}")
     def hiz(self):                   return self.cmd(f"hiz {self.motor}")
+    def softstop(self):              return self.cmd(f"softstop {self.motor}")
     def hardstop(self):             return self.cmd(f"hardstop {self.motor}")
     def setprofile(self, microsteps=8, acceleration=1000, speed=500):
         return self.cmd(f"setprofile {self.motor} {int(microsteps)} {int(acceleration)} {int(speed)}")
@@ -685,15 +714,106 @@ class Stepper:
                 "intended, raise max_step_magnitude when opening the motor."
             )
 
+    def _is_busy(self, default_when_unknown: bool = False) -> bool:
+        """Whether the controller reports the motor still rotating (``busy`` query).
+
+        The reply is a status flag; it is interpreted liberally (an integer, or a
+        word like ``busy``/``idle``).  When it cannot be interpreted the caller's
+        ``default_when_unknown`` is returned so an unfamiliar/garbled reply never
+        wedges a wait loop forever.
+        """
+        try:
+            reply = self.busy()
+        except Exception:  # pragma: no cover - hardware quirk
+            return default_when_unknown
+        text = " ".join(reply).lower()
+        for token in text.replace(",", " ").split():
+            try:
+                return int(token) != 0
+            except ValueError:
+                continue
+        if any(w in text for w in ("busy", "moving", "run")):
+            return True
+        if any(w in text for w in ("idle", "stop", "ready", "done", "ok")):
+            return False
+        return default_when_unknown
+
+    def _wait_until_idle(self) -> None:
+        """Block until the motor has stopped, *interruptibly*.
+
+        Unlike a single bare ``wait`` this stays in a Python loop for the whole
+        motion, so (a) a ``KeyboardInterrupt`` from the notebook's Interrupt
+        button reaches us and is turned into an emergency stop by
+        :meth:`move_by`, and (b) an :meth:`emergency_stop` fired from another
+        thread (a STOP button) is noticed via ``self._estop`` and ends the wait
+        at once.  ``wait`` is still used as the primary blocker -- it returns to
+        us at latest after the serial timeout -- and ``busy`` confirms the motor
+        really stopped, so long moves that outrun a single ``wait`` keep waiting.
+        """
+        while True:
+            if self._estop.is_set():
+                return
+            self.wait()
+            if self._estop.is_set():
+                return
+            # If busy can't be read/interpreted, assume idle (default_when_unknown
+            # =False) so behaviour degrades to a single wait rather than hanging.
+            if not self._is_busy(default_when_unknown=False):
+                return
+
+    def emergency_stop(self) -> None:
+        """Halt the motor immediately and switch off its coils.
+
+        Sends ``hardstop`` (instant stop) then ``hiz`` (coils off) straight to
+        the controller.  Safe to call from *any* thread at *any* time -- including
+        while a move is in progress -- so it can be wired to a notebook STOP
+        button.  It briefly takes the I/O lock so its bytes do not interleave with
+        an in-flight command, but falls back to writing regardless after a short
+        wait: an emergency stop must not be blocked by a poll cycle.
+
+        A hard stop causes the L6470 step counter to lose steps, so after this the
+        absolute position is untrustworthy: re-establish it with
+        :meth:`set_position` (bead at a known reference) before any calibrated
+        move.  A move interrupted this way raises :class:`EmergencyStop`.
+        """
+        self._estop.set()
+        got = self._io_lock.acquire(timeout=0.5)
+        try:
+            self.ser.write(f"hardstop {self.motor}\n".encode("ascii"))
+            self.ser.write(f"hiz {self.motor}\n".encode("ascii"))
+            self.ser.flush()
+        except Exception as exc:  # pragma: no cover - hardware quirk
+            print(f"WARNING: emergency_stop could not write to the controller: {exc}")
+        finally:
+            if got:
+                self._io_lock.release()
+        print(
+            "EMERGENCY STOP: hardstop + hiz sent -- motor halted and coils off. "
+            "The absolute position is now unreliable (a hard stop loses steps); "
+            "re-establish it with set_position() before any further move."
+        )
+
     def move_by(self, delta_steps: int) -> None:
         delta = int(delta_steps)
         if delta == 0:
             return
         self._guard_move(delta)
+        # Arm a fresh emergency-stop latch for this move.
+        self._estop.clear()
         # translate a logical (unwind-positive) step delta into the raw rotation
         # sense the configured unwind direction demands.
         self.rotate(self.direction_sign * delta)
-        self.wait()
+        try:
+            self._wait_until_idle()
+        except KeyboardInterrupt:
+            # Interrupt button pressed mid-move: stop the motor, then propagate.
+            self.emergency_stop()
+            raise EmergencyStop(
+                "Move aborted by keyboard interrupt; motor hard-stopped."
+            ) from None
+        if self._estop.is_set():
+            # A STOP button (another thread) fired during the move.
+            raise EmergencyStop("Move aborted by emergency stop; motor hard-stopped.")
         # Keep the persisted position current: prefer the controller's own count,
         # but if it is silent advance the saved position by the commanded delta so
         # we never lose track of where the bead is.
@@ -981,6 +1101,7 @@ def run_scan(
 __all__ = [
     "Calibration",
     "SubThreadCalibration",
+    "EmergencyStop",
     "MotorState",
     "motor_state_path",
     "SimulatedMotor",

@@ -24,6 +24,7 @@ notebook = [
     "ipykernel>=6.29",
     "jupyterlab>=4.0",
     "notebook>=7.0",
+    "ipywidgets>=8.1",  # on-screen EMERGENCY STOP button in the calibration notebook
 ]
 
 [tool.uv]
