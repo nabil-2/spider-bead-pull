@@ -73,6 +73,12 @@ class StepperConfig:
     # physical rotation that unwinds the thread and advances the bead:
     # "clockwise" or "counterclockwise" (aliases "cw"/"ccw"; +1/-1 also accepted).
     unwind_direction: str = "clockwise"
+    # Persisted motor position + home file; null => the default shared absolute
+    # path (~/.madmax_bead_pull/motor_state.json), so every program agrees.
+    state_file: str | None = None
+    # Refuse a single move larger than this many steps (a runaway circuit-breaker,
+    # since this rig has no limit switch); null disables the check.
+    max_step_magnitude: int | None = 500_000
 
     def __post_init__(self) -> None:
         # fail fast on a bad value rather than at motor-open time
@@ -351,6 +357,8 @@ def build_motor(cfg: MeasurementConfig, simulate: bool):
         driving_voltage=st.driving_voltage,
         holding_voltage=st.holding_voltage,
         unwind_direction=st.unwind_direction,
+        state_path=st.state_file,
+        max_step_magnitude=st.max_step_magnitude,
     )
 
 

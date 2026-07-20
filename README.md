@@ -30,7 +30,8 @@ Drives the single-motor bead through every pass of the thread inside the booster
   (plus optional `setup()`/`teardown()`), so you can drop in your own. A working
   `Stepper` (L6470 over serial) and a `SimulatedMotor` are included.
 - **Calibration:** run [calibrate_bead_pull.ipynb](calibrate_bead_pull.ipynb).
-  It homes to the limit switch, then for each sub-thread you jog the bead to the
+  You set a **home position** (this rig has no limit switch — see *Homing and the
+  motor-state file* below), then for each sub-thread you jog the bead to the
   **start** (the position zero) and to the **end** and capture both motor step
   counts; you also give each sub-thread its `name`, its start/end (x,y,z) in the
   booster frame, and optional non-measurement margins. Direction, scan length and
@@ -48,6 +49,31 @@ holds the data-taking settings (instruments + scan); the **calibration file** is
 the per-sub-thread record produced by the calibration process (step anchors,
 `name`, 3-D endpoints, margins). The step↔metre conversion is **not** a setting —
 each sub-thread derives its own from its step anchors and 3-D endpoints.
+
+### Homing and the motor-state file
+
+This rig has **no limit switch**, so there is no automatic hardware home (an
+earlier version drove `gotoswitch` and the motor spun forever). Instead:
+
+- **Home is a position you set.** In the calibration notebook, jog the bead to a
+  repeatable physical reference and call `motor.set_home()`. `motor.home()` then
+  performs a normal, bounded move back to that saved step count.
+- **A shared state file remembers where the motor is.** The current motor
+  position *and* the home position are persisted to a small JSON file at a fixed
+  absolute path — `~/.madmax_bead_pull/motor_state.json` by default (override with
+  the `MADMAX_BEAD_PULL_STATE` environment variable or the `stepper.state_file`
+  config key). Because the L6470's step register resets to zero on a power cycle,
+  on connect the controller register is written back to the saved position with
+  `setpos`, keeping the absolute step frame — and therefore the calibration
+  anchors — stable across power cycles. Every program on the computer reads and
+  writes the same file, so they all agree on the position and home.
+- **Safety.** Reading the position no longer crashes if the controller gives an
+  empty reply (power/cable loss) — it falls back to the saved position with a
+  warning. Single moves larger than `stepper.max_step_magnitude` steps are refused
+  as a runaway circuit-breaker.
+
+If the bead is moved by hand while the controller is off, the saved position is
+stale; re-establish it with `motor.set_position(<steps>)` before homing.
 
 ### Configuration reference
 
@@ -83,7 +109,7 @@ Top level:
 | `sub_thread_indices` | `null` | List of sub-thread indices to scan. `null` → all calibrated sub-threads. |
 | `length_m` | `null` | Override the scan length for **every** sub-thread, in metres. `null` → each sub-thread's calibrated length (the distance between its 3-D endpoints). The per-sub-thread margins are still applied on top. |
 | `include_endpoint` | `true` | Also visit the exact end of each sub-thread (after the end margin) when the stepping doesn't land on it. |
-| `home_first` | `true` | Home to the limit switch before the scan starts. |
+| `home_first` | `true` | Move to the saved home position before the scan starts. Requires a home to have been set (see *Homing and the motor-state file*); otherwise the run stops with a clear error. |
 
 `stepper` — L6470 motor controller (keys match `Stepper.open(...)`):
 
@@ -99,6 +125,8 @@ Top level:
 | `driving_voltage` | `6.8` | Driving voltage, V. |
 | `holding_voltage` | `2.0` | Holding voltage, V. |
 | `unwind_direction` | `"clockwise"` | Physical rotation that unwinds the thread and advances the bead: `"clockwise"` or `"counterclockwise"` (aliases `"cw"`/`"ccw"`; `+1`/`-1` also accepted). Sets the travel sign. |
+| `state_file` | `null` | Path to the shared motor-state file (current position + home). `null` → the default absolute path `~/.madmax_bead_pull/motor_state.json` (also overridable via the `MADMAX_BEAD_PULL_STATE` env var), so every program on the computer shares one file. See *Homing and the motor-state file*. |
+| `max_step_magnitude` | `500000` | Refuse any single move larger than this many steps — a runaway circuit-breaker, since this rig has no limit switch. `null` disables the check. |
 
 `vna` — Rohde & Schwarz analyser; one complex **S<port_a><port_b>** trace per
 bead position:

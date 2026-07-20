@@ -28,6 +28,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -56,6 +57,111 @@ def _parse_int(reply: Sequence[str]) -> int:
     if last is None:
         raise ValueError(f"Could not parse an integer position from reply: {reply!r}")
     return last
+
+
+def _opt_int(value: Any) -> int | None:
+    """Coerce a value to ``int``, returning ``None`` for missing/unparsable input."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Persistent motor state (position + home), shared across programs
+# ---------------------------------------------------------------------------
+# This rig has no limit switch, so the absolute motor position cannot be
+# recovered from the hardware after a power cycle (the L6470 step register resets
+# to zero).  Instead the *logical* motor position and an operator-chosen *home*
+# position are persisted to a small JSON file at a fixed absolute path in the
+# user's home directory, so every program on the same computer (this package, the
+# calibration notebook, any other script) shares one motor position and one home
+# reference.  Both are stored in the logical (unwind-positive) frame -- the same
+# frame ``get_position``/``move_by`` and the calibration step anchors use.
+# Override the location with the ``MADMAX_BEAD_PULL_STATE`` environment variable.
+MOTOR_STATE_ENV_VAR = "MADMAX_BEAD_PULL_STATE"
+DEFAULT_MOTOR_STATE_PATH = Path.home() / ".madmax_bead_pull" / "motor_state.json"
+
+
+def motor_state_path(path: str | Path | None = None) -> Path:
+    """Resolve the motor-state file location.
+
+    Precedence: explicit ``path`` argument, then the ``MADMAX_BEAD_PULL_STATE``
+    environment variable, then the default
+    ``~/.madmax_bead_pull/motor_state.json``.
+    """
+    if path is not None:
+        return Path(path).expanduser()
+    env = os.environ.get(MOTOR_STATE_ENV_VAR)
+    if env:
+        return Path(env).expanduser()
+    return DEFAULT_MOTOR_STATE_PATH
+
+
+@dataclass
+class MotorState:
+    """The persisted motor position and home position (logical frame, steps).
+
+    Backed by a JSON file at an absolute path (see :func:`motor_state_path`) so it
+    is shared by every program driving the motor on this computer.
+    ``position_steps`` is the last known motor position; ``home_steps`` is the
+    operator-set home reference the motor returns to on :meth:`Stepper.home`.
+    Either may be ``None`` until it has first been established.  Writes are atomic
+    (temp file + ``os.replace``) so a crash mid-write cannot corrupt the file.
+    """
+
+    path: Path
+    position_steps: int | None = None
+    home_steps: int | None = None
+    updated_utc: str | None = None
+
+    @classmethod
+    def load(cls, path: str | Path | None = None) -> "MotorState":
+        """Load the state file, or return an empty state if it is absent/corrupt."""
+        resolved = motor_state_path(path)
+        state = cls(path=resolved)
+        try:
+            data = json.loads(resolved.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            return state  # missing / unreadable / malformed -> establish it later
+        if isinstance(data, dict):
+            state.position_steps = _opt_int(data.get("position_steps"))
+            state.home_steps = _opt_int(data.get("home_steps"))
+            updated = data.get("updated_utc")
+            state.updated_utc = str(updated) if updated is not None else None
+        return state
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "position_steps": self.position_steps,
+            "home_steps": self.home_steps,
+            "updated_utc": self.updated_utc,
+        }
+
+    def _save(self) -> None:
+        self.updated_utc = _utcnow()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+        os.replace(tmp, self.path)  # atomic on the same filesystem
+
+    def set_position(self, steps: int) -> int:
+        """Persist ``steps`` as the current motor position (no write if unchanged)."""
+        steps = int(steps)
+        if steps != self.position_steps:
+            self.position_steps = steps
+            self._save()
+        return steps
+
+    def set_home(self, steps: int) -> int:
+        """Persist ``steps`` as the home position (no write if unchanged)."""
+        steps = int(steps)
+        if steps != self.home_steps:
+            self.home_steps = steps
+            self._save()
+        return steps
 
 
 # The physical direction the motor turns for a *positive* raw ``rotate`` command
@@ -368,16 +474,25 @@ class Calibration:
 # Motors (any object with home/get_position/move_by/shutdown works)
 # ---------------------------------------------------------------------------
 class SimulatedMotor:
-    """In-memory motor for dry runs and tests; tracks an integer step counter."""
+    """In-memory motor for dry runs and tests; tracks an integer step counter.
 
-    def __init__(self, start_position: int = 0, verbose: bool = False) -> None:
+    Mirrors the :class:`Stepper` interface, including the settable *home* position
+    (``home_position`` defaults to ``0`` so a plain ``home()`` returns to zero).
+    It keeps its state in memory only -- it does not touch the shared state file.
+    """
+
+    def __init__(self, start_position: int = 0, home_position: int | None = 0,
+                 verbose: bool = False) -> None:
         self._position = int(start_position)
+        self._home = int(home_position) if home_position is not None else None
         self.verbose = verbose
 
     def home(self) -> None:
-        self._position = 0
+        if self._home is None:
+            raise RuntimeError("No home position set; call set_home() first.")
+        self.move_by(self._home - self._position)
         if self.verbose:
-            print("[SimulatedMotor] home -> 0")
+            print(f"[SimulatedMotor] home -> {self._position}")
 
     def get_position(self) -> int:
         return self._position
@@ -386,6 +501,24 @@ class SimulatedMotor:
         self._position += int(delta_steps)
         if self.verbose:
             print(f"[SimulatedMotor] move_by {int(delta_steps):+d} -> {self._position}")
+
+    def set_home(self, position: int | None = None) -> int:
+        """Record a home position (default: the current position)."""
+        self._home = int(position) if position is not None else self._position
+        if self.verbose:
+            print(f"[SimulatedMotor] set_home -> {self._home}")
+        return self._home
+
+    @property
+    def home_position(self) -> int | None:
+        return self._home
+
+    def set_position(self, steps: int) -> int:
+        """Override the tracked position (the simulated analogue of ``setpos``)."""
+        self._position = int(steps)
+        if self.verbose:
+            print(f"[SimulatedMotor] set_position -> {self._position}")
+        return self._position
 
     def shutdown(self) -> None:
         pass
@@ -400,9 +533,16 @@ class Stepper:
     ``pyserial`` is imported lazily so the rest of the module works without it.
     """
 
+    # Refuse any single move larger than this many steps unless overridden; a
+    # cheap circuit-breaker against a runaway from a bad target (the physical
+    # limit switch that would have stopped one is not present on this rig).
+    DEFAULT_MAX_STEP_MAGNITUDE = 500_000
+
     def __init__(self, port: str, baud: int = 115200, timeout: float = 1.0,
                  motor: int = 1, reset_delay: float = 2.0,
-                 unwind_direction: str | int = "clockwise") -> None:
+                 unwind_direction: str | int = "clockwise",
+                 state_path: str | Path | None = None,
+                 max_step_magnitude: int | None = DEFAULT_MAX_STEP_MAGNITUDE) -> None:
         import serial  # lazy: only needed for real hardware
 
         self.ser = serial.Serial(port, baud, timeout=timeout)
@@ -411,6 +551,13 @@ class Stepper:
         # rotation sense; the high-level interface (move_by/get_position) works in
         # the logical frame so the calibration step anchors are unaffected.
         self.direction_sign = unwind_direction_sign(unwind_direction)
+        self.max_step_magnitude = (
+            int(max_step_magnitude) if max_step_magnitude is not None else None
+        )
+        # Persisted position + home, shared with every other program on this
+        # computer.  Loaded now; the controller register is reconciled to it in
+        # restore_position() once the port is up and any reset has happened.
+        self.state = MotorState.load(state_path)
         time.sleep(reset_delay)  # USB-serial bridges often reset on open
         self.ser.reset_input_buffer()
 
@@ -418,13 +565,19 @@ class Stepper:
     def open(cls, port: str, baud: int = 115200, motor: int = 1, timeout: float = 1.0,
              microsteps: int = 8, acceleration: int = 1000, speed: int = 500,
              driving_voltage: float = 6.8, holding_voltage: float = 2.0,
-             configure: bool = True, unwind_direction: str | int = "clockwise") -> "Stepper":
+             configure: bool = True, unwind_direction: str | int = "clockwise",
+             state_path: str | Path | None = None,
+             max_step_magnitude: int | None = DEFAULT_MAX_STEP_MAGNITUDE) -> "Stepper":
         dev = cls(port, baud=baud, timeout=timeout, motor=motor,
-                  unwind_direction=unwind_direction)
+                  unwind_direction=unwind_direction, state_path=state_path,
+                  max_step_magnitude=max_step_magnitude)
         if configure:
             dev.reset()
             dev.setprofile(microsteps, acceleration, speed)
             dev.setvoltage(driving_voltage, holding_voltage)
+        # After any reset (which zeroes the register), put the controller's step
+        # count back in sync with the last saved position.
+        dev.restore_position()
         return dev
 
     # -- raw I/O / command set --------------------------------------------
@@ -443,10 +596,15 @@ class Stepper:
         return lines
 
     def reset(self):                 return self.cmd("reset")
-    def gotoswitch(self):            return self.cmd(f"gotoswitch {self.motor}")
+    def gotoswitch(self):
+        # WARNING: rotates until a limit switch triggers.  This rig has no switch,
+        # so this never stops on its own -- do NOT use it for homing (that was the
+        # original runaway bug).  home() uses a saved position instead.
+        return self.cmd(f"gotoswitch {self.motor}")
     def wait(self):                  return self.cmd(f"wait {self.motor}")
     def rotate(self, steps):         return self.cmd(f"rotate {self.motor} {int(steps)}")
     def getpos(self):                return self.cmd(f"getpos {self.motor}", expect_reply=True)
+    def setpos(self, step):          return self.cmd(f"setpos {self.motor} {int(step)}")
     def clearpos(self):              return self.cmd(f"clearpos {self.motor}")
     def hiz(self):                   return self.cmd(f"hiz {self.motor}")
     def hardstop(self):             return self.cmd(f"hardstop {self.motor}")
@@ -456,23 +614,140 @@ class Stepper:
         return self.cmd(f"setvoltage {self.motor} {driving} {holding}")
 
     # -- high-level interface ---------------------------------------------
-    def home(self) -> None:
-        self.gotoswitch()
-        self.wait()
-        self.clearpos()
+    def restore_position(self) -> None:
+        """Reconcile the controller's step register with the persisted position.
+
+        With no limit switch the register is meaningless after a power cycle (it
+        resets to zero while the bead stays put), so on connect we write the last
+        saved *logical* position back into it with ``setpos``.  That keeps the
+        absolute step frame -- and therefore the calibration anchors -- stable
+        across power cycles and across programs.  If no position has ever been
+        saved, adopt whatever the controller currently reports and persist it as
+        the baseline.
+        """
+        saved = self.state.position_steps
+        if saved is not None:
+            try:
+                self.setpos(self.direction_sign * int(saved))
+            except Exception as exc:  # pragma: no cover - hardware quirk
+                print(f"WARNING: could not restore saved position via setpos: {exc}")
+            return
+        raw = self._read_raw_position()
+        if raw is not None:
+            self.state.set_position(self.direction_sign * raw)
+
+    def _read_raw_position(self) -> int | None:
+        """Controller step register (raw frame), or ``None`` if it gave no reply.
+
+        Reading the position must never crash a session: after power is cut or a
+        cable is pulled, ``getpos`` returns an empty reply (the original crash).
+        """
+        try:
+            return _parse_int(self.getpos())
+        except ValueError:
+            return None
+
+    def _persist_logical(self, raw: int) -> int:
+        """Convert a raw register reading to the logical frame and persist it."""
+        return self.state.set_position(self.direction_sign * raw)
 
     def get_position(self) -> int:
-        # controller register is in the raw-rotation frame; report it in the
-        # logical frame so it round-trips with ``move_by``.
-        return self.direction_sign * _parse_int(self.getpos())
+        """Current motor position in the logical frame.
+
+        The controller register is authoritative when it answers (reported in the
+        logical frame so it round-trips with ``move_by``, and persisted).  If the
+        controller is silent -- power removed, cable pulled -- fall back to the
+        last saved position with a warning instead of raising.
+        """
+        raw = self._read_raw_position()
+        if raw is not None:
+            return self._persist_logical(raw)
+        tracked = self.state.position_steps
+        if tracked is None:
+            raise RuntimeError(
+                "Cannot determine the motor position: the controller returned no "
+                "reply and no position has ever been saved. Check the serial "
+                "connection and motor power, then set the position with "
+                "set_position()."
+            )
+        print(
+            "WARNING: controller returned no position; using the last saved value "
+            f"({tracked} steps). Check the serial connection and motor power."
+        )
+        return tracked
+
+    def _guard_move(self, delta: int) -> None:
+        cap = self.max_step_magnitude
+        if cap is not None and abs(delta) > cap:
+            raise ValueError(
+                f"Refusing to move {delta:+d} steps: exceeds the safety limit of "
+                f"{cap} steps (max_step_magnitude). If this move really is "
+                "intended, raise max_step_magnitude when opening the motor."
+            )
 
     def move_by(self, delta_steps: int) -> None:
-        if int(delta_steps) == 0:
+        delta = int(delta_steps)
+        if delta == 0:
             return
+        self._guard_move(delta)
         # translate a logical (unwind-positive) step delta into the raw rotation
         # sense the configured unwind direction demands.
-        self.rotate(self.direction_sign * int(delta_steps))
+        self.rotate(self.direction_sign * delta)
         self.wait()
+        # Keep the persisted position current: prefer the controller's own count,
+        # but if it is silent advance the saved position by the commanded delta so
+        # we never lose track of where the bead is.
+        raw = self._read_raw_position()
+        if raw is not None:
+            self._persist_logical(raw)
+        else:
+            base = self.state.position_steps
+            if base is not None:
+                self.state.set_position(base + delta)
+            print(
+                "WARNING: controller returned no position after the move; advanced "
+                f"the saved position by {delta:+d} steps instead."
+            )
+
+    def home(self) -> None:
+        """Drive the bead to the saved home position.
+
+        This rig has no limit switch, so 'home' is an operator-set position (see
+        :meth:`set_home`), not a physical switch -- this is an ordinary bounded
+        move to that step count, never the old runaway ``gotoswitch``.
+        """
+        target = self.state.home_steps
+        if target is None:
+            raise RuntimeError(
+                "No home position has been set. Set one with set_home() (e.g. in "
+                "the calibration notebook) before calling home()."
+            )
+        self.move_by(int(target) - self.get_position())
+
+    def set_home(self, position: int | None = None) -> int:
+        """Record a home position (default: the current position) and persist it.
+
+        Saved to the shared state file so every program on this computer homes to
+        the same place.  Returns the home step count.
+        """
+        pos = int(position) if position is not None else self.get_position()
+        return self.state.set_home(pos)
+
+    @property
+    def home_position(self) -> int | None:
+        """The saved home position (logical steps), or ``None`` if unset."""
+        return self.state.home_steps
+
+    def set_position(self, steps: int) -> int:
+        """Teach the controller its current position (raw ``setpos`` + persist).
+
+        Use this to re-establish the absolute frame after physically placing the
+        bead at a known reference -- the manual stand-in for the missing limit
+        switch.  Returns the position in the logical frame.
+        """
+        steps = int(steps)
+        self.setpos(self.direction_sign * steps)
+        return self.state.set_position(steps)
 
     def shutdown(self) -> None:
         try:
@@ -554,7 +829,7 @@ class BeadPullController:
         self.log = logger
 
     def home(self) -> None:
-        self.log("Homing to limit switch ...")
+        self.log("Homing to the saved home position ...")
         self.motor.home()
         self.log(f"Homed; position = {self.motor.get_position()} steps")
 
@@ -706,6 +981,8 @@ def run_scan(
 __all__ = [
     "Calibration",
     "SubThreadCalibration",
+    "MotorState",
+    "motor_state_path",
     "SimulatedMotor",
     "Stepper",
     "unwind_direction_sign",
