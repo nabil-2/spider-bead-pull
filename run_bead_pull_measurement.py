@@ -104,6 +104,10 @@ class ScanConfig:
 @dataclass
 class MeasurementConfig:
     calibration_file: str = "config/bead_pull_calibration.json"
+    # disk spacings (mm) of the setup under test and a free-text note; recorded
+    # verbatim in the run metadata so each run is self-describing.
+    disk_spacings_mm: list[float] = field(default_factory=list)
+    comment: str = ""
     output_root: str = "data/bead_pull_runs"
     output_dir: str | None = None           # None => timestamped under output_root
     scan: ScanConfig = field(default_factory=ScanConfig)
@@ -120,6 +124,8 @@ class MeasurementConfig:
         output = data.get("output") or {}
         return cls(
             calibration_file=data.get("calibration_file", cls.calibration_file),
+            disk_spacings_mm=list(data.get("disk_spacings_mm") or []),
+            comment=data.get("comment", ""),
             output_root=output.get("root", cls.output_root),
             output_dir=output.get("directory"),
             scan=_build(ScanConfig, data.get("scan")),
@@ -412,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
             metadata={
                 "config_file": args.config,
                 "config": dataclasses.asdict(cfg),
+                "disk_spacings_mm": cfg.disk_spacings_mm,
+                "comment": cfg.comment,
                 "simulate": args.simulate,
                 "vna_testmode": args.vna_testmode,
             },

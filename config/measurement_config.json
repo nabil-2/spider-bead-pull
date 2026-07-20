@@ -1,5 +1,7 @@
 {
   "calibration_file": "config/bead_pull_calibration.json",
+  "disk_spacings_mm": [],
+  "comment": "",
   "output": {
     "root": "data/spider_bead_pull_runs",
     "directory": null

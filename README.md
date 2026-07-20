@@ -64,6 +64,8 @@ Top level:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `calibration_file` | `"config/bead_pull_calibration.json"` | Path (relative to the repo root) of the calibration-data file the run reads. |
+| `disk_spacings_mm` | `[]` | Array of disk spacings (mm) describing the setup under test. Not used by the scan; recorded verbatim in the run metadata so each run is self-describing. |
+| `comment` | `""` | Free-text note about the measurement. Not used by the scan; recorded verbatim in the run metadata. |
 
 `output` — where results are written:
 
@@ -88,7 +90,7 @@ Top level:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `port` | `null` | Serial port, e.g. `"/dev/ttyUSB0"` or `"COM5"`. Required for a real run. |
-| `baud` | `115200` | Serial baud rate. |
+| `baud` | `9600` | Serial baud rate. |
 | `motor` | `1` | Motor number (the `[n]` in the controller's command set). |
 | `configure` | `true` | On connect, push the profile + voltages below to the controller. |
 | `microsteps` | `8` | Microsteps per full step. |
@@ -96,16 +98,17 @@ Top level:
 | `speed` | `500` | Speed profile value. |
 | `driving_voltage` | `6.8` | Driving voltage, V. |
 | `holding_voltage` | `2.0` | Holding voltage, V. |
+| `unwind_direction` | `"clockwise"` | Physical rotation that unwinds the thread and advances the bead: `"clockwise"` or `"counterclockwise"` (aliases `"cw"`/`"ccw"`; `+1`/`-1` also accepted). Sets the travel sign. |
 
 `vna` — Rohde & Schwarz analyser; one complex **S<port_a><port_b>** trace per
 bead position:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `ip_address` | `"169.254.218.2"` | VNA TCP/IP address. |
+| `ip_address` | `"169.254.127.120"` | VNA TCP/IP address. |
 | `channel` | `1` | VNA channel. |
-| `port_a` | `3` | First index of the measured S-parameter S<port_a><port_b>. |
-| `port_b` | `3` | Second index. `port_a == port_b` → a reflection (e.g. S33); the shipped config uses `port_a=2, port_b=1` → **S21**. |
+| `port_a` | `2` | First index of the measured S-parameter S<port_a><port_b>. |
+| `port_b` | `2` | Second index. `port_a == port_b` → a reflection; the shipped config uses `port_a=2, port_b=2` → **S22**. |
 | `start_freq_Hz` | `18e9` | Sweep start frequency, Hz. |
 | `stop_freq_Hz` | `24e9` | Sweep stop frequency, Hz. |
 | `points` | `1001` | Number of frequency points per trace. |
@@ -152,18 +155,33 @@ python run_bead_pull_measurement.py --config config/measurement_config.json   # 
 
 ### Output
 
-Each run writes `data/bead_pull_runs/<timestamp>/`:
+Each run writes `data/bead_pull_runs/<timestamp>/` (the `root`/`directory` from
+the `output` block):
 
-- `s11_traces.h5` — complex `s_parameter` of shape `(n_points, n_freq)` (attrs
-  `s_param`/`port_a`/`port_b`/`averages`) plus `frequencies_Hz`.
+- `s11_traces.h5` — complex `s_parameter` dataset of shape `(n_points, n_freq)`
+  (resizable; one row appended per bead position) plus the `frequencies_Hz` axis.
+  Dataset attrs: `s_param`, `port_a`, `port_b`, `channel`, `averages`, `testmode`.
+  The filename is fixed regardless of which S-parameter is measured.
 - `scan_log.csv` / `scan_log.jsonl` — one row per bead position: sub-thread,
   point index, `position_m` (the **true** bead position in metres along the
   sub-thread, converted from the motor's actual step count), the same point in the
   3-D booster frame (`position_x_m`/`position_y_m`/`position_z_m` in the CSV, a
   `position_xyz_m` triple in the JSONL), timestamp, and the measurement result
   (e.g. a `trace_index` into the HDF5).
-- `scan_manifest.json` — the full resolved config, the calibration used, and
-  start/finish timestamps (self-contained record of the run).
+- `scan_manifest.json` — a self-contained record of the run, written at start and
+  updated at finish. Top level: `started_utc` / `finished_utc`, the scan settings
+  (`step_size_m`, `include_endpoint`, `home_first`, `n_points_planned`,
+  `sub_thread_indices`, `lengths_m_override`), `calibration` (the full calibration
+  used, plus a `derived[]` list giving each sub-thread's `length_m` and
+  `steps_per_meter`), and a `metadata` block:
+  - `config_file` — path of the config that was loaded.
+  - `config` — the full resolved config (every value from the tables above,
+    including `disk_spacings_mm` and `comment`).
+  - `disk_spacings_mm` / `comment` — also surfaced at the top of `metadata` for
+    convenience.
+  - `simulate` / `vna_testmode` — which no-hardware modes were active.
+- `vna_log.txt` — Rohde & Schwarz instrument log; written only on real runs (not
+  in `--vna-testmode`).
 
 Requirements for a real run: `pyserial` (stepper) and `rohdeschwarz` (VNA), both
 imported lazily so simulated/test runs work without them.
