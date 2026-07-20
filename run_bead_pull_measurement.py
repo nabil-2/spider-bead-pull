@@ -62,7 +62,7 @@ DEFAULT_CONFIG = "config/measurement_config.json"
 @dataclass
 class StepperConfig:
     port: str | None = None        # serial port, e.g. "/dev/ttyUSB0" or "COM5"
-    baud: int = 115200
+    baud: int = 9600
     motor: int = 1
     configure: bool = True         # push profile/voltage on connect
     microsteps: int = 8
@@ -81,10 +81,10 @@ class StepperConfig:
 
 @dataclass
 class VnaConfig:
-    ip_address: str = "169.254.218.2"
+    ip_address: str = "169.254.127.120"
     channel: int = 1
-    port_a: int = 3                # first index of S<port_a><port_b>
-    port_b: int = 3                # second index of S<port_a><port_b>
+    port_a: int = 2                # first index of S<port_a><port_b>
+    port_b: int = 2                # second index of S<port_a><port_b>
     start_freq_Hz: float = 18e9
     stop_freq_Hz: float = 24e9
     points: int = 1001

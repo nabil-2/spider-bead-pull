@@ -26,10 +26,10 @@
     "unwind_direction": "clockwise"
   },
   "vna": {
-    "ip_address": "169.254.218.2",
+    "ip_address": "169.254.127.120",
     "channel": 1,
     "port_a": 2,
-    "port_b": 1,
+    "port_b": 2,
     "start_freq_Hz": 18e9,
     "stop_freq_Hz": 24e9,
     "points": 1001,
