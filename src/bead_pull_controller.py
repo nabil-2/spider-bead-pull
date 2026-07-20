@@ -8,9 +8,12 @@ controller turns a (sub-thread, position) request into an absolute step target.
 
 Pieces:
 
-* ``Calibration`` / ``SubThreadCalibration`` -- the persisted step<->metre map.
-  Each sub-thread stores the motor step count at its *start* (the position zero)
-  and its *end*; direction and scan length follow from those two numbers.
+* ``Calibration`` / ``SubThreadCalibration`` -- the persisted anchors.  Each
+  sub-thread stores the motor step count *and* the 3-D booster position at its
+  *start* (the position zero) and its *end*; direction, scan length and the
+  step<->metre conversion all follow from those numbers.  The conversion is
+  therefore computed *per sub-thread* (steps span / Euclidean distance between the
+  two 3-D endpoints) -- there is no single global ``steps_per_meter``.
 * ``Stepper`` / ``SimulatedMotor`` -- the motor.  Any object with ``home()``,
   ``get_position()``, ``move_by(delta_steps)`` and ``shutdown()`` works, so you
   can drop in your own.  ``Stepper`` drives the L6470 ASCII controller over
@@ -24,6 +27,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -96,12 +100,17 @@ def unwind_direction_sign(unwind_direction: str | int) -> int:
 Xyz = tuple[float, float, float]
 
 
-def _as_xyz(value: Any) -> Xyz | None:
+def _as_xyz(value: Any, which: str) -> Xyz:
+    """Parse a required (x, y, z) triple; raise if it is missing or malformed.
+
+    The 3-D endpoints are no longer optional: the step<->metre conversion of a
+    sub-thread is derived from the distance between them, so both are mandatory.
+    """
     if value is None:
-        return None
+        raise ValueError(f"{which}_xyz_m is required (used to derive the step<->metre scale)")
     xyz = tuple(float(c) for c in value)
     if len(xyz) != 3:
-        raise ValueError(f"expected an (x, y, z) triple, got {value!r}")
+        raise ValueError(f"expected an (x, y, z) triple for {which}_xyz_m, got {value!r}")
     return xyz
 
 
@@ -109,24 +118,31 @@ def _as_xyz(value: Any) -> Xyz | None:
 class SubThreadCalibration:
     """One pass of the thread through the booster.
 
-    ``start_steps`` is the motor position at the bead-position zero, ``end_steps``
-    at the far end; direction and length follow from the two.  ``margin_start_m``
-    and ``margin_end_m`` are non-measurement margins (in metres): the bead still
-    travels through them, but no measurement is taken within ``margin_start_m`` of
-    the start or ``margin_end_m`` of the end.  ``start_xyz_m`` / ``end_xyz_m`` are
-    the (x, y, z) positions of the pass's start and end points in the booster
-    coordinate system (metres); with them the 1-D bead position can be mapped to a
-    3-D booster position.
+    Each pass is anchored at both ends by two measured quantities: the motor step
+    count (``start_steps`` at the bead-position zero, ``end_steps`` at the far end)
+    and the 3-D booster position (``start_xyz_m`` / ``end_xyz_m``, the (x, y, z) of
+    those same two points in the booster coordinate system, metres).  Everything
+    else is derived from these four numbers:
+
+    * ``direction`` and ``length_steps`` from the step anchors,
+    * ``length_m`` (the physical length of the pass) from the distance between the
+      two 3-D endpoints, and
+    * ``steps_per_meter``, the step<->metre conversion *for this pass*, from the two
+      together (step span / physical length).  There is no global conversion.
+
+    ``margin_start_m`` and ``margin_end_m`` are non-measurement margins (metres):
+    the bead still travels through them, but no measurement is taken within
+    ``margin_start_m`` of the start or ``margin_end_m`` of the end.
     """
 
     index: int
     start_steps: int
     end_steps: int
+    start_xyz_m: Xyz
+    end_xyz_m: Xyz
     name: str | None = None
     margin_start_m: float = 0.0
     margin_end_m: float = 0.0
-    start_xyz_m: Xyz | None = None
-    end_xyz_m: Xyz | None = None
 
     @property
     def direction(self) -> int:
@@ -138,6 +154,20 @@ class SubThreadCalibration:
         return abs(self.end_steps - self.start_steps)
 
     @property
+    def length_m(self) -> float:
+        """Physical length of the pass: the Euclidean distance between its two 3-D
+        endpoints, in metres (the pass is modelled as the straight, taut segment
+        between them)."""
+        return math.dist(self.start_xyz_m, self.end_xyz_m)
+
+    @property
+    def steps_per_meter(self) -> float:
+        """Step<->metre conversion for *this* sub-thread, derived from its own
+        anchors: the motor step span divided by the physical length between the two
+        3-D endpoints (``steps = metres * steps_per_meter``)."""
+        return self.length_steps / self.length_m
+
+    @property
     def label(self) -> str:
         return self.name if self.name else f"sub_thread_{self.index}"
 
@@ -147,8 +177,8 @@ class SubThreadCalibration:
             "name": self.name,
             "margin_start_m": self.margin_start_m,
             "margin_end_m": self.margin_end_m,
-            "start_xyz_m": list(self.start_xyz_m) if self.start_xyz_m is not None else None,
-            "end_xyz_m": list(self.end_xyz_m) if self.end_xyz_m is not None else None,
+            "start_xyz_m": list(self.start_xyz_m),
+            "end_xyz_m": list(self.end_xyz_m),
             "start_steps": self.start_steps,
             "end_steps": self.end_steps,
         }
@@ -159,26 +189,26 @@ class SubThreadCalibration:
             index=int(data["index"]),
             start_steps=int(data["start_steps"]),
             end_steps=int(data["end_steps"]),
+            start_xyz_m=_as_xyz(data.get("start_xyz_m"), "start"),
+            end_xyz_m=_as_xyz(data.get("end_xyz_m"), "end"),
             name=data.get("name"),
             margin_start_m=float(data.get("margin_start_m", 0.0)),
             margin_end_m=float(data.get("margin_end_m", 0.0)),
-            start_xyz_m=_as_xyz(data.get("start_xyz_m")),
-            end_xyz_m=_as_xyz(data.get("end_xyz_m")),
         )
 
 
 @dataclass
 class Calibration:
-    """The measured sub-thread anchors, plus the step<->metre conversion.
+    """The measured sub-thread anchors.
 
-    The calibration file holds the per-sub-thread ``index``/``name`` and the
-    measured ``start_steps``/``end_steps`` (established by the calibration
-    notebook).  ``steps_per_meter`` (steps = metres * steps_per_meter) is *not*
-    stored here -- it is a manually-set value in the measurement config, supplied
-    at load time via :meth:`from_calibration_file`.
+    The calibration file holds, per sub-thread, the ``index``/``name``, the
+    measured ``start_steps``/``end_steps`` and the ``start_xyz_m``/``end_xyz_m``
+    booster positions (all established by the calibration notebook).  The
+    step<->metre conversion is *not* a single global number: each sub-thread
+    carries its own, derived from its step span and the distance between its 3-D
+    endpoints (see :attr:`SubThreadCalibration.steps_per_meter`).
     """
 
-    steps_per_meter: float
     sub_threads: list[SubThreadCalibration]
     created_utc: str = field(default_factory=_utcnow)
     schema_version: int = CALIBRATION_SCHEMA_VERSION
@@ -197,31 +227,28 @@ class Calibration:
         raise KeyError(f"No sub-thread with index {index}; have {self.indices()}")
 
     def length_m(self, index: int) -> float:
-        return self.get(index).length_steps / self.steps_per_meter
+        return self.get(index).length_m
 
     def steps_for_position(self, index: int, x_m: float) -> int:
         """Absolute motor step count for bead position ``x_m`` (metres from zero)."""
         sub = self.get(index)
-        return sub.start_steps + sub.direction * int(round(x_m * self.steps_per_meter))
+        return sub.start_steps + sub.direction * int(round(x_m * sub.steps_per_meter))
 
     def position_for_steps(self, index: int, steps: int) -> float:
         """Bead position (metres from zero) for an absolute step count."""
         sub = self.get(index)
-        return (steps - sub.start_steps) * sub.direction / self.steps_per_meter
+        return (steps - sub.start_steps) * sub.direction / sub.steps_per_meter
 
-    def booster_xyz(self, index: int, position_m: float) -> "Xyz | None":
+    def booster_xyz(self, index: int, position_m: float) -> "Xyz":
         """3-D booster-coordinate position (metres) of a bead at ``position_m``
         along a sub-thread.
 
         The sub-thread is the straight line from ``start_xyz_m`` (at position 0)
         to ``end_xyz_m`` (at the calibrated length); the 1-D position is mapped
-        onto it by linear interpolation.  Returns ``None`` if the sub-thread has
-        no 3-D endpoints.
+        onto it by linear interpolation.
         """
         sub = self.get(index)
-        if sub.start_xyz_m is None or sub.end_xyz_m is None:
-            return None
-        length_m = self.length_m(index)
+        length_m = sub.length_m
         frac = 0.0 if length_m == 0 else position_m / length_m
         s, e = sub.start_xyz_m, sub.end_xyz_m
         return (
@@ -263,8 +290,6 @@ class Calibration:
         return np.asarray(points, dtype=float)
 
     def validate(self) -> None:
-        if self.steps_per_meter <= 0:
-            raise ValueError("steps_per_meter must be positive")
         seen: set[int] = set()
         for sub in self.sub_threads:
             if sub.index in seen:
@@ -273,15 +298,20 @@ class Calibration:
             if sub.length_steps == 0:
                 raise ValueError(
                     f"Sub-thread {sub.label} has start_steps == end_steps "
-                    "(zero length); re-calibrate its end point."
+                    "(zero step span); re-calibrate its end point."
                 )
             if sub.margin_start_m < 0 or sub.margin_end_m < 0:
                 raise ValueError(f"Sub-thread {sub.label} has a negative margin.")
             for xyz, which in ((sub.start_xyz_m, "start"), (sub.end_xyz_m, "end")):
-                if xyz is not None and len(xyz) != 3:
+                if len(xyz) != 3:
                     raise ValueError(
                         f"Sub-thread {sub.label}: {which}_xyz_m must have 3 components."
                     )
+            if sub.length_m == 0:
+                raise ValueError(
+                    f"Sub-thread {sub.label} has coincident start_xyz_m and end_xyz_m "
+                    "(zero physical length); the step<->metre scale is undefined."
+                )
 
     def to_dict(self) -> dict[str, Any]:
         # Calibration file = measured data only (step anchors) plus provenance.
@@ -299,17 +329,17 @@ class Calibration:
         return path
 
     @classmethod
-    def from_calibration_file(cls, path: str | Path, steps_per_meter: float) -> "Calibration":
+    def from_calibration_file(cls, path: str | Path) -> "Calibration":
         """Build a calibration from the sub-thread anchors in ``path`` (index,
-        name, start/end steps, ...) plus the manually-set ``steps_per_meter`` from
-        the measurement config."""
+        name, start/end steps and start/end 3-D positions).  The step<->metre
+        conversion is derived per sub-thread from those anchors, so nothing else is
+        needed."""
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         subs = sorted(
             (SubThreadCalibration.from_dict(entry) for entry in data["sub_threads"]),
             key=lambda s: s.index,
         )
         cal = cls(
-            steps_per_meter=float(steps_per_meter),
             sub_threads=subs,
             created_utc=data.get("created_utc", _utcnow()),
             schema_version=int(data.get("schema_version", CALIBRATION_SCHEMA_VERSION)),
@@ -319,15 +349,16 @@ class Calibration:
 
     def summary(self) -> str:
         lines = [
-            f"Calibration ({self.n_sub_threads} sub-threads, "
-            f"steps_per_meter={self.steps_per_meter:.6g})",
+            f"Calibration ({self.n_sub_threads} sub-threads; "
+            "steps_per_meter derived per sub-thread)",
             f"{'idx':>3}  {'name':<12} {'start':>9} {'end':>9} "
-            f"{'dir':>3} {'len_m':>8} {'mrg_s':>7} {'mrg_e':>7}",
+            f"{'dir':>3} {'len_m':>8} {'steps/m':>10} {'mrg_s':>7} {'mrg_e':>7}",
         ]
         for sub in sorted(self.sub_threads, key=lambda s: s.index):
             lines.append(
                 f"{sub.index:>3}  {sub.label:<12} {sub.start_steps:>9} "
-                f"{sub.end_steps:>9} {sub.direction:>3} {self.length_m(sub.index):>8.4f} "
+                f"{sub.end_steps:>9} {sub.direction:>3} {sub.length_m:>8.4f} "
+                f"{sub.steps_per_meter:>10.6g} "
                 f"{sub.margin_start_m:>7.4f} {sub.margin_end_m:>7.4f}"
             )
         return "\n".join(lines)
@@ -462,7 +493,8 @@ class ScanPoint:
     obtained by converting the motor's actual step count back to metres -- i.e.
     the position really reached (on the step lattice), not the requested grid
     value.  ``position_xyz_m`` is that same point in the 3-D booster coordinate
-    system (``None`` if the sub-thread has no 3-D endpoints).
+    system, obtained by interpolating between the sub-thread's calibrated
+    endpoints.
     """
 
     sub_thread_index: int
@@ -470,7 +502,7 @@ class ScanPoint:
     point_index: int
     n_points: int
     position_m: float
-    position_xyz_m: "Xyz | None"
+    position_xyz_m: "Xyz"
     timestamp_utc: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -480,7 +512,7 @@ class ScanPoint:
             "point_index": self.point_index,
             "n_points": self.n_points,
             "position_m": self.position_m,
-            "position_xyz_m": list(self.position_xyz_m) if self.position_xyz_m is not None else None,
+            "position_xyz_m": list(self.position_xyz_m),
             "timestamp_utc": self.timestamp_utc,
         }
 
@@ -608,8 +640,17 @@ def run_scan(
         ),
         "lengths_m_override": lengths_m or {},
         "calibration": {
-            "steps_per_meter": controller.calibration.steps_per_meter,
             **controller.calibration.to_dict(),
+            # step<->metre scale is derived per sub-thread (step span / 3-D length),
+            # recorded here so the run is a self-contained record.
+            "derived": [
+                {
+                    "index": sub.index,
+                    "length_m": sub.length_m,
+                    "steps_per_meter": sub.steps_per_meter,
+                }
+                for sub in controller.calibration.sub_threads
+            ],
         },
         "metadata": metadata or {},
     }

@@ -1,6 +1,5 @@
 {
   "calibration_file": "config/bead_pull_calibration.json",
-  "steps_per_meter": 100000.0,
   "output": {
     "root": "data/spider_bead_pull_runs",
     "directory": null

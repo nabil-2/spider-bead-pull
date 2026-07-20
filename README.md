@@ -33,9 +33,10 @@ Drives the single-motor bead through every pass of the thread inside the booster
   It homes to the limit switch, then for each sub-thread you jog the bead to the
   **start** (the position zero) and to the **end** and capture both motor step
   counts; you also give each sub-thread its `name`, its start/end (x,y,z) in the
-  booster frame, and optional non-measurement margins. Direction and scan length
-  are derived from the
-  anchors. The result is written to `config/bead_pull_calibration.json` (see
+  booster frame, and optional non-measurement margins. Direction, scan length and
+  the **step↔metre conversion** are all derived per sub-thread from these anchors
+  (the conversion is the step span divided by the distance between the two 3-D
+  endpoints). The result is written to `config/bead_pull_calibration.json` (see
   [config/bead_pull_calibration.example.json](config/bead_pull_calibration.example.json)).
 - **Measurement:** [run_bead_pull_measurement.py](run_bead_pull_measurement.py).
   The `VnaMeasurement` backend (Rohde & Schwarz `rohdeschwarz` over TCP, ported
@@ -43,9 +44,10 @@ Drives the single-motor bead through every pass of the thread inside the booster
   trace per bead position into `s11_traces.h5`.
 
 There are **two config files** (both under `config/`): the **measurement config**
-holds the data-taking settings (instruments + scan) and the manual
-`steps_per_meter`; the **calibration file** is the per-sub-thread record produced
-by the calibration process (anchors, `name`, 3-D endpoints, margins).
+holds the data-taking settings (instruments + scan); the **calibration file** is
+the per-sub-thread record produced by the calibration process (step anchors,
+`name`, 3-D endpoints, margins). The step↔metre conversion is **not** a setting —
+each sub-thread derives its own from its step anchors and 3-D endpoints.
 
 ### Configuration reference
 
@@ -62,7 +64,6 @@ Top level:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `calibration_file` | `"config/bead_pull_calibration.json"` | Path (relative to the repo root) of the calibration-data file the run reads. |
-| `steps_per_meter` | `1.0e5` | Manual step↔metre conversion (`steps = metres × steps_per_meter`). Set this before measuring; it is **not** stored in the calibration file. With microsteps `8` and a 400-step motor (3200 steps/rev) it is ≈ 3200 ÷ (wheel circumference). |
 
 `output` — where results are written:
 
@@ -78,7 +79,7 @@ Top level:
 | `step_size_m` | `0.01` | Spacing between measured bead positions within a sub-thread, in metres. |
 | `settle_s` | `0.5` | Pause after each move before measuring, in seconds (lets the bead stop swinging). |
 | `sub_thread_indices` | `null` | List of sub-thread indices to scan. `null` → all calibrated sub-threads. |
-| `length_m` | `null` | Override the scan length for **every** sub-thread, in metres. `null` → each sub-thread's calibrated length (`|end − start| ÷ steps_per_meter`). The per-sub-thread margins are still applied on top. |
+| `length_m` | `null` | Override the scan length for **every** sub-thread, in metres. `null` → each sub-thread's calibrated length (the distance between its 3-D endpoints). The per-sub-thread margins are still applied on top. |
 | `include_endpoint` | `true` | Also visit the exact end of each sub-thread (after the end margin) when the stepping doesn't land on it. |
 | `home_first` | `true` | Home to the limit switch before the scan starts. |
 
@@ -113,9 +114,10 @@ bead position:
 #### `config/bead_pull_calibration.json`
 
 Written by the calibration notebook; one entry per pass of the thread, with the
-measured step anchors and per-sub-thread settings. The `steps_per_meter`
-conversion is **not** stored here — it comes from the measurement config at load
-time. Example:
+measured step anchors, the 3-D endpoints and per-sub-thread settings. The
+step↔metre conversion is **not** stored — each sub-thread derives its own from
+its step span (`|end_steps − start_steps|`) and the distance between its 3-D
+endpoints. Example:
 [config/bead_pull_calibration.example.json](config/bead_pull_calibration.example.json).
 
 | Key | Type | Meaning |
@@ -126,10 +128,10 @@ time. Example:
 | `sub_threads[].name` | str / null | Label shown in logs (falls back to `sub_thread_<index>`). |
 | `sub_threads[].margin_start_m` | float | Non-measurement margin after the start, in metres: no point is measured within this distance of the **zero**. `0` → measure from the start. |
 | `sub_threads[].margin_end_m` | float | Non-measurement margin before the end, in metres: no point is measured within this distance of the **far end**. `0` → measure to the end. |
-| `sub_threads[].start_xyz_m` | [x,y,z] / null | Position of the pass's **start** (the zero) in the booster coordinate system, in metres. |
-| `sub_threads[].end_xyz_m` | [x,y,z] / null | Position of the pass's **end** in the booster coordinate system, in metres. Together with `start_xyz_m` this defines the sub-thread line, onto which each `position_m` is linearly mapped to give the 3-D booster position. |
+| `sub_threads[].start_xyz_m` | [x,y,z] | **Required.** Position of the pass's **start** (the zero) in the booster coordinate system, in metres. |
+| `sub_threads[].end_xyz_m` | [x,y,z] | **Required.** Position of the pass's **end** in the booster coordinate system, in metres. Together with `start_xyz_m` this defines the sub-thread line, onto which each `position_m` is linearly mapped to give the 3-D booster position; the **distance** between the two is also the physical length that sets this sub-thread's step↔metre scale, so enter both accurately. |
 | `sub_threads[].start_steps` | int | Absolute motor step count at the bead-position **zero** of the pass. |
-| `sub_threads[].end_steps` | int | Absolute motor step count at the **far end**. The sign of `end − start` gives the travel direction; `|end − start|` the length. |
+| `sub_threads[].end_steps` | int | Absolute motor step count at the **far end**. The sign of `end − start` gives the travel direction; `|end − start|` the step span. The step span ÷ the endpoint distance is this sub-thread's step↔metre conversion. |
 
 ### Running
 

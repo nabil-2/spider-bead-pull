@@ -104,7 +104,6 @@ class ScanConfig:
 @dataclass
 class MeasurementConfig:
     calibration_file: str = "config/bead_pull_calibration.json"
-    steps_per_meter: float = 1.0e5          # manual step<->metre conversion (steps = m * this)
     output_root: str = "data/bead_pull_runs"
     output_dir: str | None = None           # None => timestamped under output_root
     scan: ScanConfig = field(default_factory=ScanConfig)
@@ -121,7 +120,6 @@ class MeasurementConfig:
         output = data.get("output") or {}
         return cls(
             calibration_file=data.get("calibration_file", cls.calibration_file),
-            steps_per_meter=data.get("steps_per_meter", cls.steps_per_meter),
             output_root=output.get("root", cls.output_root),
             output_dir=output.get("directory"),
             scan=_build(ScanConfig, data.get("scan")),
@@ -367,9 +365,10 @@ def build_measurement(cfg: MeasurementConfig, output_dir: Path, testmode: bool) 
 
 
 def load_calibration(cfg: MeasurementConfig) -> Calibration:
-    """Load the sub-thread anchors (calibration file) and attach the manually-set
-    ``steps_per_meter`` from the measurement config."""
-    return Calibration.from_calibration_file(cfg.calibration_file, cfg.steps_per_meter)
+    """Load the sub-thread anchors (calibration file).  The step<->metre
+    conversion is derived per sub-thread from those anchors, so nothing else is
+    needed."""
+    return Calibration.from_calibration_file(cfg.calibration_file)
 
 
 def main(argv: list[str] | None = None) -> int:
