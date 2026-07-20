@@ -128,7 +128,7 @@ Top level:
 | `speed` | `500` | Speed profile value. |
 | `driving_voltage` | `6.8` | Driving voltage, V. |
 | `holding_voltage` | `2.0` | Holding voltage, V. |
-| `unwind_direction` | `"clockwise"` | Physical rotation that unwinds the thread and advances the bead: `"clockwise"` or `"counterclockwise"` (aliases `"cw"`/`"ccw"`; `+1`/`-1` also accepted). Sets the travel sign. |
+| `unwind_direction` | `"counterclockwise"` | Physical rotation that unwinds the thread and advances the bead: `"clockwise"` or `"counterclockwise"` (aliases `"cw"`/`"ccw"`; `+1`/`-1` also accepted). Sets the travel sign. |
 | `state_file` | `null` | Path to the shared motor-state file (current position + home). `null` → the default absolute path `~/.madmax_bead_pull/motor_state.json` (also overridable via the `MADMAX_BEAD_PULL_STATE` env var), so every program on the computer shares one file. See *Homing and the motor-state file*. |
 | `max_step_magnitude` | `500000` | Refuse any single move larger than this many steps — a runaway circuit-breaker, since this rig has no limit switch. `null` disables the check. |
 

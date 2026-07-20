@@ -72,7 +72,7 @@ class StepperConfig:
     holding_voltage: float = 2.0
     # physical rotation that unwinds the thread and advances the bead:
     # "clockwise" or "counterclockwise" (aliases "cw"/"ccw"; +1/-1 also accepted).
-    unwind_direction: str = "clockwise"
+    unwind_direction: str = "counterclockwise"
     # Persisted motor position + home file; null => the default shared absolute
     # path (~/.madmax_bead_pull/motor_state.json), so every program agrees.
     state_file: str | None = None

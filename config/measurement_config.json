@@ -24,7 +24,7 @@
     "speed": 500,
     "driving_voltage": 6.8,
     "holding_voltage": 2.0,
-    "unwind_direction": "clockwise"
+    "unwind_direction": "counterclockwise"
   },
   "vna": {
     "ip_address": "169.254.127.120",
